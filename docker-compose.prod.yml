@@ -25,8 +25,9 @@ services:
       - JWT_SECRET=${JWT_SECRET:?Definí JWT_SECRET (openssl rand -hex 32)}
       # Postgres del servidor: base y usuario propios de Postiz. Prisma crea las tablas al arrancar.
       - DATABASE_URL=${DATABASE_URL:?Definí DATABASE_URL, ej. postgresql://postiz:clave@postgres:5432/postiz}
-      # Redis del servidor, con un número de base propio para no mezclar claves.
-      - REDIS_URL=${REDIS_URL:?Definí REDIS_URL, ej. redis://redis:6379/3}
+      # Opcional: Redis del servidor con un número de base propio (ej. redis://redis:6379/3).
+      # Vacío, Postiz usa un reemplazo en memoria (alcanza para una sola instancia).
+      - REDIS_URL=${REDIS_URL:-}
       - BACKEND_INTERNAL_URL=http://localhost:3000
       # Sin TEMPORAL_ADDRESS se usa el Temporal embebido (localhost:7233).
       - IS_GENERAL=true

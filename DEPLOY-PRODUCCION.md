@@ -104,7 +104,7 @@ Guardarlos en el gestor de contraseñas. **Si se pierde `JWT_SECRET` se cierran 
 |---|---|
 | `POSTIZ_URL` | `https://postiz.siux.co` (tiene que ser https) |
 | `JWT_SECRET` | el generado |
-| `REDIS_URL` | Redis del servidor con una base libre, ej. `redis://redis:6379/3` |
+| `REDIS_URL` | opcional: Redis del servidor con una base libre, ej. `redis://redis:6379/3` (con el nombre del contenedor, no `localhost`) |
 | `DATABASE_URL` | `postgresql://postiz:<clave>@<host>:5432/postiz` |
 | `SHARED_NETWORK` | `backend_net` (valor por defecto) |
 | `MINIO_ENDPOINT` | host interno de MinIO, como en tarotia, ej. `minio` |
