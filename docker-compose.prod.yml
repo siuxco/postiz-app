@@ -2,9 +2,10 @@
 # Portainer solo descarga imágenes ya construidas, no buildea acá. Las variables se
 # cargan en Portainer (ver .env.prod.example); las obligatorias cortan el deploy si faltan.
 #
-# Base de datos y archivos usan los servicios que ya corren en el servidor: Postgres por
-# DATABASE_URL y MinIO con las mismas variables MINIO_* que tarotia.app. Postiz los alcanza
-# por la red de Docker SHARED_NETWORK; las redes sociales bajan los archivos de MINIO_PUBLIC_URL. Requiere la imagen del fork siuxco/postiz-app, que agrega
+# Un solo contenedor: Temporal corre embebido en la imagen (Dockerfile.siux) y guarda su
+# base SQLite en el volumen /config. Postgres, Redis y MinIO son los que ya corren en el
+# servidor y se alcanzan por la red SHARED_NETWORK; las redes sociales bajan los archivos
+# de MINIO_PUBLIC_URL. Requiere la imagen del fork siuxco/postiz-app, que agrega
 # CLOUDFLARE_ENDPOINT para usar un S3 compatible en lugar de R2.
 services:
   postiz:
@@ -24,9 +25,10 @@ services:
       - JWT_SECRET=${JWT_SECRET:?Definí JWT_SECRET (openssl rand -hex 32)}
       # Postgres del servidor: base y usuario propios de Postiz. Prisma crea las tablas al arrancar.
       - DATABASE_URL=${DATABASE_URL:?Definí DATABASE_URL, ej. postgresql://postiz:clave@postgres:5432/postiz}
-      - REDIS_URL=redis://postiz-redis:6379
+      # Redis del servidor, con un número de base propio para no mezclar claves.
+      - REDIS_URL=${REDIS_URL:?Definí REDIS_URL, ej. redis://redis:6379/3}
       - BACKEND_INTERNAL_URL=http://localhost:3000
-      - TEMPORAL_ADDRESS=temporal:7233
+      # Sin TEMPORAL_ADDRESS se usa el Temporal embebido (localhost:7233).
       - IS_GENERAL=true
       # Con la base vacía Postiz deja crear el primer usuario aunque esté en true;
       # después nadie más puede registrarse.
@@ -78,14 +80,7 @@ services:
     volumes:
       - postiz-config:/config
     networks:
-      - postiz-network
-      - temporal-network
       - shared-network
-    depends_on:
-      postiz-redis:
-        condition: service_healthy
-      temporal:
-        condition: service_started
     healthcheck:
       # La imagen no trae curl ni wget; Node 22 tiene fetch.
       test: ['CMD-SHELL', "node -e \"fetch('http://127.0.0.1:5000/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))\""]
@@ -94,94 +89,12 @@ services:
       retries: 3
       start_period: 120s
 
-  postiz-redis:
-    image: redis:7.2
-    container_name: postiz-redis
-    restart: unless-stopped
-    volumes:
-      - postiz-redis-data:/data
-    networks:
-      - postiz-network
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-  # ── Temporal: ejecuta los workflows de publicación programada ──
-  temporal-postgresql:
-    image: postgres:16
-    container_name: temporal-postgresql
-    restart: unless-stopped
-    environment:
-      - POSTGRES_USER=temporal
-      - POSTGRES_PASSWORD=${TEMPORAL_DB_PASSWORD:?Definí TEMPORAL_DB_PASSWORD}
-    volumes:
-      # Volumen con nombre: sin esto los posts programados se pierden al recrear el contenedor.
-      - temporal-postgres-data:/var/lib/postgresql/data
-    networks:
-      - temporal-network
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U temporal']
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-  temporal-elasticsearch:
-    image: elasticsearch:7.17.27
-    container_name: temporal-elasticsearch
-    restart: unless-stopped
-    environment:
-      - discovery.type=single-node
-      - ES_JAVA_OPTS=-Xms256m -Xmx256m
-      - xpack.security.enabled=false
-      - cluster.routing.allocation.disk.threshold_enabled=true
-      - cluster.routing.allocation.disk.watermark.low=512mb
-      - cluster.routing.allocation.disk.watermark.high=256mb
-      - cluster.routing.allocation.disk.watermark.flood_stage=128mb
-    volumes:
-      - temporal-es-data:/usr/share/elasticsearch/data
-    networks:
-      - temporal-network
-
-  temporal:
-    image: temporalio/auto-setup:1.28.1
-    container_name: temporal
-    restart: unless-stopped
-    depends_on:
-      temporal-postgresql:
-        condition: service_healthy
-      temporal-elasticsearch:
-        condition: service_started
-    environment:
-      - DB=postgres12
-      - DB_PORT=5432
-      - POSTGRES_USER=temporal
-      - POSTGRES_PWD=${TEMPORAL_DB_PASSWORD}
-      - POSTGRES_SEEDS=temporal-postgresql
-      # Config de producción incluida en la imagen (la del repo trae flags de desarrollo
-      # y obligaría a montar archivos en Portainer).
-      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/docker.yaml
-      - ENABLE_ES=true
-      - ES_SEEDS=temporal-elasticsearch
-      - ES_VERSION=v7
-      - TEMPORAL_NAMESPACE=default
-    # Sin puertos publicados: solo lo usa postiz por la red interna.
-    networks:
-      - temporal-network
-
 volumes:
+  # Config de Postiz y la base de Temporal (temporal.db): sin esto se pierden los posts programados.
   postiz-config:
-  postiz-redis-data:
-  temporal-postgres-data:
-  temporal-es-data:
 
 networks:
-  postiz-network:
-    driver: bridge
-  temporal-network:
-    driver: bridge
-  # Red existente donde están Postgres y MinIO (la misma que usa tarotia.app).
+  # Red existente donde están Postgres, Redis y MinIO (la misma que usa tarotia.app).
   shared-network:
     external: true
     name: ${SHARED_NETWORK:-backend_net}

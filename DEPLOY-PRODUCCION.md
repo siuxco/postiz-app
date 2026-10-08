@@ -7,6 +7,7 @@ Archivos preparados (sin commit todavía):
 - `docker-compose.prod.yml`: stack para Portainer. Solo descarga imágenes, no construye.
 - `.env.prod.example`: variables a cargar en Portainer.
 - `.github/workflows/siux-build.yaml`: construye la imagen del fork y avisa a Portainer.
+- `Dockerfile.siux` y `var/docker/siux-start.sh`: la imagen de Postiz (`Dockerfile.dev`, sin tocar) más un Temporal embebido. Si se define `TEMPORAL_ADDRESS` con otro host, usa ese y no levanta el propio.
 - Cambio de código en `libraries/nestjs-libraries/src/upload/cloudflare.storage.ts` y `r2.uploader.ts`: variable opcional `CLOUDFLARE_ENDPOINT` para usar un S3 compatible (MinIO) en lugar de R2. Sin esa variable el comportamiento es el de siempre.
 
 **Por qué hace falta un fork:** Postiz solo sabe guardar en disco local o en Cloudflare R2, con el endpoint de R2 fijo en el código. Para MinIO hubo que tocar el código, así que la imagen oficial de gitroomhq no sirve: se construye una propia (`ghcr.io/siuxco/postiz-app`).
@@ -90,7 +91,6 @@ En Cloudflare, zona `siux.co`: crear el registro `postiz` apuntando al servidor,
 ```bash
 openssl rand -hex 32   # JWT_SECRET
 openssl rand -hex 24   # clave del usuario postiz en Postgres (va en DATABASE_URL)
-openssl rand -hex 24   # TEMPORAL_DB_PASSWORD
 ```
 
 Guardarlos en el gestor de contraseñas. **Si se pierde `JWT_SECRET` se cierran todas las sesiones; si se pierden las contraseñas de las bases, no se puede volver a levantar el stack con los datos existentes.**
@@ -103,7 +103,8 @@ Guardarlos en el gestor de contraseñas. **Si se pierde `JWT_SECRET` se cierran 
 | Variable | Valor |
 |---|---|
 | `POSTIZ_URL` | `https://postiz.siux.co` (tiene que ser https) |
-| `JWT_SECRET`, `TEMPORAL_DB_PASSWORD` | los generados |
+| `JWT_SECRET` | el generado |
+| `REDIS_URL` | Redis del servidor con una base libre, ej. `redis://redis:6379/3` |
 | `DATABASE_URL` | `postgresql://postiz:<clave>@<host>:5432/postiz` |
 | `SHARED_NETWORK` | `backend_net` (valor por defecto) |
 | `MINIO_ENDPOINT` | host interno de MinIO, como en tarotia, ej. `minio` |
@@ -117,7 +118,7 @@ Guardarlos en el gestor de contraseñas. **Si se pierde `JWT_SECRET` se cierran 
 | `FACEBOOK_APP_SECRET` | Meta for Developers → Postiz → Información básica |
 
    **Dejar `EMAIL_PROVIDER` vacío** hasta tener `RESEND_API_KEY` y `EMAIL_FROM_ADDRESS`: con un proveedor configurado y sin clave, Postiz pide activar la cuenta por email y el primer usuario no puede entrar.
-3. **Deploy the stack.** El primer arranque tarda unos minutos: Temporal crea su base y Postiz su esquema. El contenedor `postiz` pasa a `healthy` cuando responde.
+3. **Deploy the stack.** El primer arranque tarda unos minutos: Temporal (embebido en la imagen, base SQLite en `/config/temporal.db`) crea su base y Postiz su esquema. El contenedor `postiz` pasa a `healthy` cuando responde.
 4. **Webhook:** en el stack, activar *Webhook* y copiar la URL. En el fork → Settings → Variables → `PORTAINER_WEBHOOK`. Desde entonces, cada build redeploya solo.
 
 ## 6. Proxy con TLS (Nginx Proxy Manager)
@@ -185,4 +186,4 @@ En `docker-compose.yaml` local: volver `MAIN_URL`, `FRONTEND_URL` y `NEXT_PUBLIC
 
 - **Deploy de cambios:** push a la rama `siux` + tag de versión (o *Run workflow*). El webhook redeploya solo.
 - **Actualizar Postiz:** `git fetch upstream && git merge upstream/main` en `siux`, resolver conflictos (los cambios propios son solo los archivos de este deploy y los dos de `upload/`), tag y build.
-- **Backups:** la base `postiz` en el Postgres del servidor (sumarla a sus backups), el volumen `temporal-postgres-data` y el bucket `postiz` en MinIO.
+- **Backups:** la base `postiz` en el Postgres del servidor (sumarla a sus backups), el volumen `postiz-config` (tiene `temporal.db`, con los posts programados) y el bucket `postiz` en MinIO.

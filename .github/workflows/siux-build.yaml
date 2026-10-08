@@ -3,7 +3,8 @@ name: Siux Build
 # Igual que siux.co / siux.studio: al pushear un tag de versión (o a mano) construye
 # la imagen, la sube a GHCR del repo y avisa a Portainer para que redeploye.
 # Corre en el fork siuxco/postiz-app (en gitroomhq/postiz-app no corre). La imagen trae
-# el soporte de MinIO (CLOUDFLARE_ENDPOINT) que la oficial no tiene; ver DEPLOY-PRODUCCION.md.
+# el soporte de MinIO (CLOUDFLARE_ENDPOINT) y un Temporal embebido que la oficial no
+# tiene; ver DEPLOY-PRODUCCION.md.
 # En el fork: deshabilitar "Build Containers" (build-containers.yml) en la pestaña Actions,
 # porque también corre con cada tag y falla al intentar pushear a ghcr.io/gitroomhq.
 
@@ -35,7 +36,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      # Base: la imagen de Postiz tal cual (Dockerfile.dev, igual que upstream).
+      - name: Build and push base
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -44,11 +46,23 @@ jobs:
           push: true
           build-args: |
             NEXT_PUBLIC_VERSION=${{ github.ref_name }}
+          tags: ghcr.io/${{ github.repository }}:base-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Final: base + Temporal embebido (Dockerfile.siux).
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.siux
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            BASE_IMAGE=ghcr.io/${{ github.repository }}:base-${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository }}:${{ github.sha }}
             ghcr.io/${{ github.repository }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Trigger Portainer Webhook
         if: success() && vars.PORTAINER_WEBHOOK != ''
