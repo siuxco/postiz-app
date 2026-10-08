@@ -7,7 +7,7 @@ Archivos preparados (sin commit todavía):
 - `docker-compose.prod.yml`: stack para Portainer. Solo descarga imágenes, no construye.
 - `.env.prod.example`: variables a cargar en Portainer.
 - `.github/workflows/siux-build.yaml`: construye la imagen del fork y avisa a Portainer.
-- `Dockerfile.siux` y `var/docker/siux-start.sh`: la imagen de Postiz (`Dockerfile.dev`, sin tocar) más un Temporal embebido. Si se define `TEMPORAL_ADDRESS` con otro host, usa ese y no levanta el propio.
+- `Dockerfile.siux` y `var/docker/siux-start.sh`: la imagen de Postiz (`Dockerfile.dev`, sin tocar) más Redis y Temporal embebidos. Si `REDIS_URL` o `TEMPORAL_ADDRESS` apuntan a otro host, usa ese y no levanta el propio.
 - Cambio de código en `libraries/nestjs-libraries/src/upload/cloudflare.storage.ts` y `r2.uploader.ts`: variable opcional `CLOUDFLARE_ENDPOINT` para usar un S3 compatible (MinIO) en lugar de R2. Sin esa variable el comportamiento es el de siempre.
 
 **Por qué hace falta un fork:** Postiz solo sabe guardar en disco local o en Cloudflare R2, con el endpoint de R2 fijo en el código. Para MinIO hubo que tocar el código, así que la imagen oficial de gitroomhq no sirve: se construye una propia (`ghcr.io/siuxco/postiz-app`).
@@ -104,7 +104,6 @@ Guardarlos en el gestor de contraseñas. **Si se pierde `JWT_SECRET` se cierran 
 |---|---|
 | `POSTIZ_URL` | `https://postiz.siux.co` (tiene que ser https) |
 | `JWT_SECRET` | el generado |
-| `REDIS_URL` | opcional: Redis del servidor con una base libre, ej. `redis://redis:6379/3` (con el nombre del contenedor, no `localhost`) |
 | `DATABASE_URL` | `postgresql://postiz:<clave>@<host>:5432/postiz` |
 | `SHARED_NETWORK` | `backend_net` (valor por defecto) |
 | `MINIO_ENDPOINT` | host interno de MinIO, como en tarotia, ej. `minio` |

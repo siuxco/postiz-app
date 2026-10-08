@@ -1,12 +1,14 @@
 # Imagen de producción de siux: la de Dockerfile.dev (BASE_IMAGE, la construye
-# siux-build.yaml) más el CLI de Temporal, que corre el servidor embebido
-# (var/docker/siux-start.sh). Dockerfile.dev queda igual al de Postiz.
+# siux-build.yaml) más Temporal y Redis embebidos (var/docker/siux-start.sh).
+# Dockerfile.dev queda igual al de Postiz.
 ARG BASE_IMAGE
 FROM temporalio/temporal:1.9.1 AS temporal
 
 FROM ${BASE_IMAGE}
 # Binario estático: corre igual en la base Debian.
 COPY --from=temporal /usr/local/bin/temporal /usr/local/bin/temporal
+RUN apt-get update && apt-get install -y --no-install-recommends redis-server \
+&& rm -rf /var/lib/apt/lists/*
 COPY var/docker/siux-start.sh /usr/local/bin/siux-start.sh
 RUN chmod +x /usr/local/bin/siux-start.sh
 CMD ["/usr/local/bin/siux-start.sh"]
