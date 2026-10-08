@@ -20,7 +20,7 @@ Con producción ya no hacen falta el túnel de Cloudflare ni la PC prendida: Ins
 Decidir o tener a mano:
 
 1. **Dominio de Postiz.** Ejemplo: `postiz.siux.co`. En este documento uso ese.
-2. **API S3 del MinIO** (no la consola `minio.sv00.siux.co`) y su URL pública. Usar la misma que tarotia.app en producción; en Portainer está en las variables del stack de tarotia (`MINIO_ENDPOINT`, `MINIO_PORT`, `MINIO_USE_SSL`).
+2. **Variables de MinIO de tarotia.app.** Postiz usa las mismas (`MINIO_ENDPOINT`, `MINIO_PORT`, `MINIO_USE_SSL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET_NAME`); copiarlas del stack de tarotia en Portainer, cambiando bucket y claves. `MINIO_ENDPOINT` tiene que ser el hostname **público** de la API S3 con `MINIO_USE_SSL=true`: si en tarotia es un nombre interno de Docker (`minio`, puerto 9000), en Postiz va el hostname público.
 3. **Cuándo.** Hacerlo **después del domingo 11/10 19:00**, cuando salga el último post programado en el Postiz local.
 4. **Datos.** Arrancar limpio (recomendado) o migrar los datos del local (ver el paso 9).
 
@@ -61,7 +61,7 @@ mc anonymous set download siux/postiz
 
 **Usuario de acceso:** crear un access key solo para Postiz, limitado a ese bucket (MinIO → Access Keys, con una policy de lectura y escritura sobre `postiz/*`). No reutilizar la clave root.
 
-**Endpoint público:** Postiz firma URLs de subida con el host de `MINIO_ENDPOINT` y el navegador sube los videos directo ahí. Por eso `MINIO_ENDPOINT` tiene que ser la URL pública https de la API (no `http://minio:9000` de la red interna de Docker).
+**Endpoint público:** Postiz firma URLs de subida con el host de `MINIO_ENDPOINT` y el navegador sube los videos directo ahí. Por eso `MINIO_ENDPOINT` tiene que ser el hostname público de la API con https (no `minio:9000` de la red interna de Docker). El stack arma `https://MINIO_ENDPOINT:MINIO_PORT` para la API y `https://MINIO_ENDPOINT/MINIO_BUCKET_NAME` como URL pública de los archivos.
 
 **CORS:** MinIO tiene que aceptar el origen de Postiz para `PUT` y exponer el header `ETag` (MinIO lo expone por defecto; sin él, la subida multiparte no puede completarse):
 
@@ -99,10 +99,11 @@ Guardarlos en el gestor de contraseñas. **Si se pierde `JWT_SECRET` se cierran 
 |---|---|
 | `POSTIZ_URL` | `https://postiz.siux.co` (tiene que ser https) |
 | `JWT_SECRET`, `POSTGRES_PASSWORD`, `TEMPORAL_DB_PASSWORD` | los generados |
-| `MINIO_ENDPOINT` | API S3 de MinIO, ej. `https://s3.sv00.siux.co` |
+| `MINIO_ENDPOINT` | hostname público de la API S3, sin `https://`, ej. `s3.sv00.siux.co` |
+| `MINIO_PORT` | `443` |
+| `MINIO_USE_SSL` | `true` |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | el access key del paso 2 |
-| `MINIO_BUCKET` | `postiz` |
-| `MINIO_PUBLIC_URL` | URL pública del bucket, ej. `https://s3.sv00.siux.co/postiz` |
+| `MINIO_BUCKET_NAME` | `postiz` |
 | `POSTIZ_PORT` | `5000`, u otro si está ocupado en el host |
 | `FACEBOOK_APP_ID` | `1833939861360105` (app "Postiz" en Meta) |
 | `FACEBOOK_APP_SECRET` | Meta for Developers → Postiz → Información básica |
@@ -131,7 +132,7 @@ Crear un *Proxy Host*:
 1. Registrarse en `https://postiz.siux.co`. Con la base vacía Postiz permite registrar el primer usuario aunque `DISABLE_REGISTRATION=true`. Después nadie más puede registrarse; para sumar gente, invitarla desde Postiz.
 2. Subir una imagen y un video en la biblioteca de medios. Comprobar:
    - que aparecen en el bucket `postiz` de MinIO;
-   - que se abren desde `MINIO_PUBLIC_URL` en una ventana privada (sin sesión);
+   - que se abren desde `https://MINIO_ENDPOINT/postiz/<archivo>` en una ventana privada (sin sesión);
    - que no se achican: la imagen tiene que quedar en su tamaño original (`DISABLE_IMAGE_COMPRESSION=true`).
 
    Si la subida del video falla en el navegador, revisar CORS (paso 2).
@@ -147,7 +148,7 @@ Crear un *Proxy Host*:
 **TikTok** (ver también `~/Downloads/tarotia-exports/PENDIENTES.md`):
 1. En la app Tarotia → Sandbox → Login Kit: redirect `https://postiz.siux.co/integrations/social/tiktok`.
 2. Cargar en Portainer `TIKTOK_CLIENT_ID` y `TIKTOK_CLIENT_SECRET` **del Sandbox** y redeployar.
-3. Para carruseles de fotos, TikTok tiene que tener verificado el origen de los archivos: en URL properties, verificar el dominio `siux.co` (cubre el subdominio de MinIO) o el prefijo `MINIO_PUBLIC_URL/`.
+3. Para carruseles de fotos, TikTok tiene que tener verificado el origen de los archivos: en URL properties, verificar el dominio `siux.co` (cubre el subdominio de MinIO) o el prefijo `https://MINIO_ENDPOINT/postiz/`.
 
 ## 9. (Opcional) Migrar datos del local
 

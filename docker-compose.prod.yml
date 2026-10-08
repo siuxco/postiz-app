@@ -2,8 +2,8 @@
 # Portainer solo descarga imágenes ya construidas, no buildea acá. Las variables se
 # cargan en Portainer (ver .env.prod.example); las obligatorias cortan el deploy si faltan.
 #
-# Los archivos subidos van al MinIO del servidor (como tarotia.app): las redes los
-# bajan de MINIO_PUBLIC_URL. Requiere la imagen del fork siuxco/postiz-app, que agrega
+# Los archivos subidos van al MinIO del servidor, con las mismas variables MINIO_* que
+# tarotia.app: las redes los bajan de https://MINIO_ENDPOINT/MINIO_BUCKET_NAME. Requiere la imagen del fork siuxco/postiz-app, que agrega
 # CLOUDFLARE_ENDPOINT para usar un S3 compatible en lugar de R2.
 services:
   postiz:
@@ -32,13 +32,16 @@ services:
 
       # === Archivos subidos → MinIO (proveedor "cloudflare" de Postiz apuntado a MinIO)
       - STORAGE_PROVIDER=cloudflare
-      # API S3 de MinIO, ej. https://s3.sv00.siux.co (no la consola web).
-      - CLOUDFLARE_ENDPOINT=${MINIO_ENDPOINT:?Definí MINIO_ENDPOINT (API S3 de MinIO)}
+      # MINIO_ENDPOINT es el hostname público de la API S3 (sin https://), como en tarotia.
+      # Siempre https: el navegador sube los videos directo a MinIO desde una página https,
+      # así que MINIO_USE_SSL tiene que ser true y no se lee.
+      - CLOUDFLARE_ENDPOINT=https://${MINIO_ENDPOINT:?Definí MINIO_ENDPOINT, ej. s3.sv00.siux.co}:${MINIO_PORT:-443}
       - CLOUDFLARE_ACCESS_KEY=${MINIO_ACCESS_KEY:?Definí MINIO_ACCESS_KEY}
       - CLOUDFLARE_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY:?Definí MINIO_SECRET_KEY}
-      - CLOUDFLARE_BUCKETNAME=${MINIO_BUCKET:-postiz}
+      - CLOUDFLARE_BUCKETNAME=${MINIO_BUCKET_NAME:-postiz}
       # URL pública del bucket (lectura anónima): desde acá las redes bajan los archivos.
-      - CLOUDFLARE_BUCKET_URL=${MINIO_PUBLIC_URL:?Definí MINIO_PUBLIC_URL, ej. https://s3.sv00.siux.co/postiz}
+      # Sin puerto, para que coincida con el prefijo verificado en TikTok (MinIO detrás del proxy en 443).
+      - CLOUDFLARE_BUCKET_URL=https://${MINIO_ENDPOINT}/${MINIO_BUCKET_NAME:-postiz}
       - CLOUDFLARE_REGION=${MINIO_REGION:-us-east-1}
       # Solo se usa para armar el endpoint de R2; con CLOUDFLARE_ENDPOINT no importa.
       - CLOUDFLARE_ACCOUNT_ID=minio
