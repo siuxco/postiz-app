@@ -2,8 +2,9 @@
 # Portainer solo descarga imágenes ya construidas, no buildea acá. Las variables se
 # cargan en Portainer (ver .env.prod.example); las obligatorias cortan el deploy si faltan.
 #
-# Los archivos subidos van al MinIO del servidor, con las mismas variables MINIO_* que
-# tarotia.app: las redes los bajan de https://MINIO_ENDPOINT/MINIO_BUCKET_NAME. Requiere la imagen del fork siuxco/postiz-app, que agrega
+# Base de datos y archivos usan los servicios que ya corren en el servidor: Postgres por
+# DATABASE_URL y MinIO con las mismas variables MINIO_* que tarotia.app. Postiz los alcanza
+# por la red de Docker SHARED_NETWORK; las redes sociales bajan los archivos de MINIO_PUBLIC_URL. Requiere la imagen del fork siuxco/postiz-app, que agrega
 # CLOUDFLARE_ENDPOINT para usar un S3 compatible en lugar de R2.
 services:
   postiz:
@@ -21,7 +22,8 @@ services:
       - FRONTEND_URL=${POSTIZ_URL}
       - NEXT_PUBLIC_BACKEND_URL=${POSTIZ_URL}/api
       - JWT_SECRET=${JWT_SECRET:?Definí JWT_SECRET (openssl rand -hex 32)}
-      - DATABASE_URL=postgresql://postiz:${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD}@postiz-postgres:5432/postiz
+      # Postgres del servidor: base y usuario propios de Postiz. Prisma crea las tablas al arrancar.
+      - DATABASE_URL=${DATABASE_URL:?Definí DATABASE_URL, ej. postgresql://postiz:clave@postgres:5432/postiz}
       - REDIS_URL=redis://postiz-redis:6379
       - BACKEND_INTERNAL_URL=http://localhost:3000
       - TEMPORAL_ADDRESS=temporal:7233
@@ -32,16 +34,17 @@ services:
 
       # === Archivos subidos → MinIO (proveedor "cloudflare" de Postiz apuntado a MinIO)
       - STORAGE_PROVIDER=cloudflare
-      # MINIO_ENDPOINT es el hostname público de la API S3 (sin https://), como en tarotia.
-      # Siempre https: el navegador sube los videos directo a MinIO desde una página https,
-      # así que MINIO_USE_SSL tiene que ser true y no se lee.
-      - CLOUDFLARE_ENDPOINT=https://${MINIO_ENDPOINT:?Definí MINIO_ENDPOINT, ej. s3.sv00.siux.co}:${MINIO_PORT:-443}
+      # MINIO_ENDPOINT/MINIO_PORT: MinIO por la red interna, sin SSL (como tarotia).
+      # MINIO_USE_SSL no se lee: la conexión interna es siempre http.
+      - CLOUDFLARE_ENDPOINT=http://${MINIO_ENDPOINT:?Definí MINIO_ENDPOINT, ej. minio}:${MINIO_PORT:-9000}
+      # URL pública https de la API de MinIO (proxy → MinIO:9000). El navegador sube los
+      # videos directo ahí con URLs firmadas para ese host.
+      - CLOUDFLARE_PUBLIC_ENDPOINT=${MINIO_PUBLIC_URL:?Definí MINIO_PUBLIC_URL, ej. https://s3.sv00.siux.co}
       - CLOUDFLARE_ACCESS_KEY=${MINIO_ACCESS_KEY:?Definí MINIO_ACCESS_KEY}
       - CLOUDFLARE_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY:?Definí MINIO_SECRET_KEY}
       - CLOUDFLARE_BUCKETNAME=${MINIO_BUCKET_NAME:-postiz}
       # URL pública del bucket (lectura anónima): desde acá las redes bajan los archivos.
-      # Sin puerto, para que coincida con el prefijo verificado en TikTok (MinIO detrás del proxy en 443).
-      - CLOUDFLARE_BUCKET_URL=https://${MINIO_ENDPOINT}/${MINIO_BUCKET_NAME:-postiz}
+      - CLOUDFLARE_BUCKET_URL=${MINIO_PUBLIC_URL}/${MINIO_BUCKET_NAME:-postiz}
       - CLOUDFLARE_REGION=${MINIO_REGION:-us-east-1}
       # Solo se usa para armar el endpoint de R2; con CLOUDFLARE_ENDPOINT no importa.
       - CLOUDFLARE_ACCOUNT_ID=minio
@@ -77,9 +80,8 @@ services:
     networks:
       - postiz-network
       - temporal-network
+      - shared-network
     depends_on:
-      postiz-postgres:
-        condition: service_healthy
       postiz-redis:
         condition: service_healthy
       temporal:
@@ -91,24 +93,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
-
-  postiz-postgres:
-    image: postgres:17-alpine
-    container_name: postiz-postgres
-    restart: unless-stopped
-    environment:
-      - POSTGRES_USER=postiz
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=postiz
-    volumes:
-      - postiz-postgres-data:/var/lib/postgresql/data
-    networks:
-      - postiz-network
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postiz -d postiz']
-      interval: 10s
-      timeout: 3s
-      retries: 5
 
   postiz-redis:
     image: redis:7.2
@@ -188,7 +172,6 @@ services:
 
 volumes:
   postiz-config:
-  postiz-postgres-data:
   postiz-redis-data:
   temporal-postgres-data:
   temporal-es-data:
@@ -198,3 +181,7 @@ networks:
     driver: bridge
   temporal-network:
     driver: bridge
+  # Red existente donde están Postgres y MinIO (la misma que usa tarotia.app).
+  shared-network:
+    external: true
+    name: ${SHARED_NETWORK:?Definí SHARED_NETWORK, la red de Docker de Postgres y MinIO}

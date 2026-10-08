@@ -52,12 +52,13 @@ const {
   CLOUDFLARE_BUCKETNAME,
   CLOUDFLARE_BUCKET_URL,
   CLOUDFLARE_ENDPOINT,
+  CLOUDFLARE_PUBLIC_ENDPOINT,
   CLOUDFLARE_REGION,
 } = process.env;
 
 // With CLOUDFLARE_ENDPOINT (S3-compatible store such as MinIO) use path-style URLs
 // and the configured region, which MinIO validates; R2 keeps its endpoint and 'auto'.
-const R2 = new S3Client({
+const r2Config = {
   region: CLOUDFLARE_ENDPOINT ? CLOUDFLARE_REGION || 'us-east-1' : 'auto',
   endpoint:
     CLOUDFLARE_ENDPOINT || `https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -69,7 +70,15 @@ const R2 = new S3Client({
     accessKeyId: CLOUDFLARE_ACCESS_KEY!,
     secretAccessKey: CLOUDFLARE_SECRET_ACCESS_KEY!,
   },
-});
+};
+const R2 = new S3Client(r2Config);
+
+// The browser uploads the parts straight to the store, so presigned URLs must use a host
+// it can reach. CLOUDFLARE_PUBLIC_ENDPOINT covers a store the server reaches on a private
+// address (e.g. MinIO on the Docker network); without it both use the same endpoint.
+const R2Signer = CLOUDFLARE_PUBLIC_ENDPOINT
+  ? new S3Client({ ...r2Config, endpoint: CLOUDFLARE_PUBLIC_ENDPOINT })
+  : R2;
 
 // Function to generate a random string
 function generateRandomString() {
@@ -173,7 +182,7 @@ export async function prepareUploadParts(req: Request, res: Response) {
         UploadId: partData.uploadId,
       };
       const command = new UploadPartCommand({ ...params });
-      const url = await getSignedUrl(R2, command, { expiresIn: 3600 });
+      const url = await getSignedUrl(R2Signer, command, { expiresIn: 3600 });
 
       // @ts-ignore
       response.presignedUrls[part.number] = url;
@@ -302,7 +311,7 @@ export async function signPart(req: Request, res: Response) {
   };
 
   const command = new UploadPartCommand({ ...params });
-  const url = await getSignedUrl(R2, command, { expiresIn: 3600 });
+  const url = await getSignedUrl(R2Signer, command, { expiresIn: 3600 });
 
   return res.status(200).json({
     url: url,

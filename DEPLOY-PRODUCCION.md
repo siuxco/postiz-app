@@ -20,9 +20,12 @@ Con producción ya no hacen falta el túnel de Cloudflare ni la PC prendida: Ins
 Decidir o tener a mano:
 
 1. **Dominio de Postiz.** Ejemplo: `postiz.siux.co`. En este documento uso ese.
-2. **Variables de MinIO de tarotia.app.** Postiz usa las mismas (`MINIO_ENDPOINT`, `MINIO_PORT`, `MINIO_USE_SSL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET_NAME`); copiarlas del stack de tarotia en Portainer, cambiando bucket y claves. `MINIO_ENDPOINT` tiene que ser el hostname **público** de la API S3 con `MINIO_USE_SSL=true`: si en tarotia es un nombre interno de Docker (`minio`, puerto 9000), en Postiz va el hostname público.
-3. **Cuándo.** Hacerlo **después del domingo 11/10 19:00**, cuando salga el último post programado en el Postiz local.
-4. **Datos.** Arrancar limpio (recomendado) o migrar los datos del local (ver el paso 9).
+2. **Postgres del servidor.** Crear una base y un usuario propios de Postiz y armar `DATABASE_URL` (`postgresql://postiz:<clave>@<host>:5432/postiz`). La clave en hex: caracteres como `@ : / #` rompen la URL. Prisma crea las tablas en el primer arranque.
+3. **MinIO de tarotia.app.** Postiz usa las mismas variables (`MINIO_ENDPOINT`, `MINIO_PORT`, `MINIO_USE_SSL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET_NAME`) con la conexión interna: `MINIO_PORT=9000`, sin SSL. Bucket y claves propios.
+4. **Red de Docker compartida (`SHARED_NETWORK`).** La red donde están Postgres y MinIO, para que Postiz los alcance por nombre. Verla con `docker network ls` / `docker inspect <contenedor-minio>`.
+5. **URL pública de MinIO (`MINIO_PUBLIC_URL`).** Un hostname https que el proxy mande a MinIO:9000, ej. `https://s3.sv00.siux.co`. Hace falta aunque Postiz use la conexión interna: ver el paso 2.
+6. **Cuándo.** Hacerlo **después del domingo 11/10 19:00**, cuando salga el último post programado en el Postiz local.
+7. **Datos.** Arrancar limpio (recomendado) o migrar los datos del local (ver el paso 9).
 
 ---
 
@@ -61,7 +64,9 @@ mc anonymous set download siux/postiz
 
 **Usuario de acceso:** crear un access key solo para Postiz, limitado a ese bucket (MinIO → Access Keys, con una policy de lectura y escritura sobre `postiz/*`). No reutilizar la clave root.
 
-**Endpoint público:** Postiz firma URLs de subida con el host de `MINIO_ENDPOINT` y el navegador sube los videos directo ahí. Por eso `MINIO_ENDPOINT` tiene que ser el hostname público de la API con https (no `minio:9000` de la red interna de Docker). El stack arma `https://MINIO_ENDPOINT:MINIO_PORT` para la API y `https://MINIO_ENDPOINT/MINIO_BUCKET_NAME` como URL pública de los archivos.
+**Endpoint público:** el backend habla con MinIO por la red interna (`http://MINIO_ENDPOINT:MINIO_PORT`), pero el navegador sube los videos directo a MinIO con URLs firmadas, e Instagram y TikTok bajan los archivos desde internet. Por eso hace falta `MINIO_PUBLIC_URL`: un Proxy Host en Nginx Proxy Manager (ej. `s3.sv00.siux.co` → `http://minio:9000`, con Let's Encrypt) que **conserve el header `Host`** (NPM lo hace por defecto), porque la firma lo incluye. Los archivos quedan en `MINIO_PUBLIC_URL/MINIO_BUCKET_NAME/<archivo>`.
+
+En NPM, para que los videos grandes no corten: en *Advanced* del proxy host, `client_max_body_size 0;` y `proxy_request_buffering off;`.
 
 **CORS:** MinIO tiene que aceptar el origen de Postiz para `PUT` y exponer el header `ETag` (MinIO lo expone por defecto; sin él, la subida multiparte no puede completarse):
 
@@ -74,7 +79,7 @@ Esta configuración es global, así que incluir los orígenes que ya use tarotia
 
 **Lectura pública:** el `ACL: public-read` que manda Postiz no tiene efecto en MinIO; lo que hace públicos los archivos es la policy anónima del bucket (`mc anonymous set download`).
 
-Comprobar que la URL pública responde, por ejemplo subiendo un archivo de prueba y abriéndolo en `https://<api-minio>/postiz/<archivo>`.
+Comprobar que la URL pública responde, por ejemplo subiendo un archivo de prueba y abriéndolo en `MINIO_PUBLIC_URL/postiz/<archivo>`.
 
 ## 3. DNS
 
@@ -84,7 +89,7 @@ En Cloudflare, zona `siux.co`: crear el registro `postiz` apuntando al servidor,
 
 ```bash
 openssl rand -hex 32   # JWT_SECRET
-openssl rand -hex 24   # POSTGRES_PASSWORD (hex: va dentro de una URL)
+openssl rand -hex 24   # clave del usuario postiz en Postgres (va en DATABASE_URL)
 openssl rand -hex 24   # TEMPORAL_DB_PASSWORD
 ```
 
@@ -98,12 +103,15 @@ Guardarlos en el gestor de contraseñas. **Si se pierde `JWT_SECRET` se cierran 
 | Variable | Valor |
 |---|---|
 | `POSTIZ_URL` | `https://postiz.siux.co` (tiene que ser https) |
-| `JWT_SECRET`, `POSTGRES_PASSWORD`, `TEMPORAL_DB_PASSWORD` | los generados |
-| `MINIO_ENDPOINT` | hostname público de la API S3, sin `https://`, ej. `s3.sv00.siux.co` |
-| `MINIO_PORT` | `443` |
-| `MINIO_USE_SSL` | `true` |
+| `JWT_SECRET`, `TEMPORAL_DB_PASSWORD` | los generados |
+| `DATABASE_URL` | `postgresql://postiz:<clave>@<host>:5432/postiz` |
+| `SHARED_NETWORK` | red de Docker de Postgres y MinIO |
+| `MINIO_ENDPOINT` | host interno de MinIO, como en tarotia, ej. `minio` |
+| `MINIO_PORT` | `9000` |
+| `MINIO_USE_SSL` | `false` |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | el access key del paso 2 |
 | `MINIO_BUCKET_NAME` | `postiz` |
+| `MINIO_PUBLIC_URL` | URL https pública de MinIO, sin barra final, ej. `https://s3.sv00.siux.co` |
 | `POSTIZ_PORT` | `5000`, u otro si está ocupado en el host |
 | `FACEBOOK_APP_ID` | `1833939861360105` (app "Postiz" en Meta) |
 | `FACEBOOK_APP_SECRET` | Meta for Developers → Postiz → Información básica |
@@ -148,7 +156,7 @@ Crear un *Proxy Host*:
 **TikTok** (ver también `~/Downloads/tarotia-exports/PENDIENTES.md`):
 1. En la app Tarotia → Sandbox → Login Kit: redirect `https://postiz.siux.co/integrations/social/tiktok`.
 2. Cargar en Portainer `TIKTOK_CLIENT_ID` y `TIKTOK_CLIENT_SECRET` **del Sandbox** y redeployar.
-3. Para carruseles de fotos, TikTok tiene que tener verificado el origen de los archivos: en URL properties, verificar el dominio `siux.co` (cubre el subdominio de MinIO) o el prefijo `https://MINIO_ENDPOINT/postiz/`.
+3. Para carruseles de fotos, TikTok tiene que tener verificado el origen de los archivos: en URL properties, verificar el dominio `siux.co` (cubre el subdominio de MinIO) o el prefijo `MINIO_PUBLIC_URL/postiz/`.
 
 ## 9. (Opcional) Migrar datos del local
 
@@ -158,9 +166,8 @@ Solo si se quiere conservar el historial. **Los posts programados no se migran s
 # En la Mac
 docker exec postiz-postgres pg_dump -U postiz-user -d postiz-db-local -Fc > postiz.dump
 
-# En el servidor (stack creado, contenedor postiz detenido)
-docker cp postiz.dump postiz-postgres:/tmp/postiz.dump
-docker exec postiz-postgres pg_restore -U postiz -d postiz --clean --if-exists --no-owner /tmp/postiz.dump
+# Contra el Postgres del servidor (stack creado, contenedor postiz detenido)
+pg_restore -d "$DATABASE_URL" --clean --if-exists --no-owner postiz.dump
 ```
 
 ## 10. Apagar lo provisorio en la Mac
@@ -178,4 +185,4 @@ En `docker-compose.yaml` local: volver `MAIN_URL`, `FRONTEND_URL` y `NEXT_PUBLIC
 
 - **Deploy de cambios:** push a la rama `siux` + tag de versión (o *Run workflow*). El webhook redeploya solo.
 - **Actualizar Postiz:** `git fetch upstream && git merge upstream/main` en `siux`, resolver conflictos (los cambios propios son solo los archivos de este deploy y los dos de `upload/`), tag y build.
-- **Backups:** volúmenes `postiz-postgres-data` y `temporal-postgres-data` (un `pg_dump` diario de `postiz` cubre lo importante), más el bucket `postiz` en MinIO.
+- **Backups:** la base `postiz` en el Postgres del servidor (sumarla a sus backups), el volumen `temporal-postgres-data` y el bucket `postiz` en MinIO.

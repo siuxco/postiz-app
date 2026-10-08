@@ -37,6 +37,7 @@ const ALLOWED_MIME_TYPES = new Set<string>([
 
 class CloudflareStorage implements IUploadProvider {
   private _client: S3Client;
+  private _signer: S3Client;
 
   constructor(
     accountID: string,
@@ -49,7 +50,7 @@ class CloudflareStorage implements IUploadProvider {
     // CLOUDFLARE_ENDPOINT lets the same provider talk to any S3-compatible store
     // (e.g. a self-hosted MinIO). Those need path-style URLs; R2 stays the default.
     const customEndpoint = process.env.CLOUDFLARE_ENDPOINT;
-    this._client = new S3Client({
+    const clientConfig = {
       endpoint: customEndpoint || `https://${accountID}.r2.cloudflarestorage.com`,
       forcePathStyle: !!customEndpoint,
       region,
@@ -57,8 +58,17 @@ class CloudflareStorage implements IUploadProvider {
         accessKeyId: accessKey,
         secretAccessKey: secretKey,
       },
-      requestChecksumCalculation: 'WHEN_REQUIRED',
-    });
+      requestChecksumCalculation: 'WHEN_REQUIRED' as const,
+    };
+    this._client = new S3Client(clientConfig);
+    // Presigned URLs are used outside the server, so they need a public host when the
+    // store is only reachable on a private address (CLOUDFLARE_PUBLIC_ENDPOINT).
+    this._signer = process.env.CLOUDFLARE_PUBLIC_ENDPOINT
+      ? new S3Client({
+          ...clientConfig,
+          endpoint: process.env.CLOUDFLARE_PUBLIC_ENDPOINT,
+        })
+      : this._client;
 
     this._client.middlewareStack.add(
       (next) =>
@@ -206,7 +216,7 @@ class CloudflareStorage implements IUploadProvider {
 
   async signDownloadUrl(fileName: string) {
     return getSignedUrl(
-      this._client,
+      this._signer,
       new GetObjectCommand({ Bucket: this._bucketName, Key: fileName }),
       { expiresIn: 3 * 3600 }
     );
@@ -214,7 +224,7 @@ class CloudflareStorage implements IUploadProvider {
 
   async signUploadUrl(fileName: string, contentType: string) {
     return getSignedUrl(
-      this._client,
+      this._signer,
       new PutObjectCommand({
         Bucket: this._bucketName,
         Key: fileName,
