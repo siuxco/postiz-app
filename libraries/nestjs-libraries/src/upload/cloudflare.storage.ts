@@ -46,8 +46,12 @@ class CloudflareStorage implements IUploadProvider {
     private _bucketName: string,
     private _uploadUrl: string
   ) {
+    // CLOUDFLARE_ENDPOINT lets the same provider talk to any S3-compatible store
+    // (e.g. a self-hosted MinIO). Those need path-style URLs; R2 stays the default.
+    const customEndpoint = process.env.CLOUDFLARE_ENDPOINT;
     this._client = new S3Client({
-      endpoint: `https://${accountID}.r2.cloudflarestorage.com`,
+      endpoint: customEndpoint || `https://${accountID}.r2.cloudflarestorage.com`,
+      forcePathStyle: !!customEndpoint,
       region,
       credentials: {
         accessKeyId: accessKey,

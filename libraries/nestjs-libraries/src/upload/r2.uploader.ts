@@ -51,11 +51,20 @@ const {
   CLOUDFLARE_SECRET_ACCESS_KEY,
   CLOUDFLARE_BUCKETNAME,
   CLOUDFLARE_BUCKET_URL,
+  CLOUDFLARE_ENDPOINT,
+  CLOUDFLARE_REGION,
 } = process.env;
 
+// With CLOUDFLARE_ENDPOINT (S3-compatible store such as MinIO) use path-style URLs
+// and the configured region, which MinIO validates; R2 keeps its endpoint and 'auto'.
 const R2 = new S3Client({
-  region: 'auto',
-  endpoint: `https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  region: CLOUDFLARE_ENDPOINT ? CLOUDFLARE_REGION || 'us-east-1' : 'auto',
+  endpoint:
+    CLOUDFLARE_ENDPOINT || `https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  forcePathStyle: !!CLOUDFLARE_ENDPOINT,
+  // MinIO validates checksums strictly: keep the SDK from adding them to the presigned
+  // part URLs the browser uploads to. R2 keeps the SDK default.
+  ...(CLOUDFLARE_ENDPOINT ? { requestChecksumCalculation: 'WHEN_REQUIRED' as const } : {}),
   credentials: {
     accessKeyId: CLOUDFLARE_ACCESS_KEY!,
     secretAccessKey: CLOUDFLARE_SECRET_ACCESS_KEY!,

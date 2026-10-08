@@ -1,0 +1,197 @@
+# Postiz en producción (stack de Portainer). Mismo esquema que siux.co / siux.studio:
+# Portainer solo descarga imágenes ya construidas, no buildea acá. Las variables se
+# cargan en Portainer (ver .env.prod.example); las obligatorias cortan el deploy si faltan.
+#
+# Los archivos subidos van al MinIO del servidor (como tarotia.app): las redes los
+# bajan de MINIO_PUBLIC_URL. Requiere la imagen del fork siuxco/postiz-app, que agrega
+# CLOUDFLARE_ENDPOINT para usar un S3 compatible en lugar de R2.
+services:
+  postiz:
+    # Imagen del fork (la construye .github/workflows/siux-build.yaml). La oficial de
+    # gitroomhq no sirve con MinIO: no tiene CLOUDFLARE_ENDPOINT.
+    image: ${POSTIZ_IMAGE:-ghcr.io/siuxco/postiz-app:latest}
+    container_name: postiz
+    restart: unless-stopped
+    ports:
+      # El proxy (Nginx Proxy Manager / Cloudflare) apunta a este puerto con TLS.
+      - '${POSTIZ_PORT:-5000}:5000'
+    environment:
+      # === Requeridas
+      - MAIN_URL=${POSTIZ_URL:?Definí POSTIZ_URL, ej. https://postiz.siux.co}
+      - FRONTEND_URL=${POSTIZ_URL}
+      - NEXT_PUBLIC_BACKEND_URL=${POSTIZ_URL}/api
+      - JWT_SECRET=${JWT_SECRET:?Definí JWT_SECRET (openssl rand -hex 32)}
+      - DATABASE_URL=postgresql://postiz:${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD}@postiz-postgres:5432/postiz
+      - REDIS_URL=redis://postiz-redis:6379
+      - BACKEND_INTERNAL_URL=http://localhost:3000
+      - TEMPORAL_ADDRESS=temporal:7233
+      - IS_GENERAL=true
+      # Con la base vacía Postiz deja crear el primer usuario aunque esté en true;
+      # después nadie más puede registrarse.
+      - DISABLE_REGISTRATION=${DISABLE_REGISTRATION:-true}
+
+      # === Archivos subidos → MinIO (proveedor "cloudflare" de Postiz apuntado a MinIO)
+      - STORAGE_PROVIDER=cloudflare
+      # API S3 de MinIO, ej. https://s3.sv00.siux.co (no la consola web).
+      - CLOUDFLARE_ENDPOINT=${MINIO_ENDPOINT:?Definí MINIO_ENDPOINT (API S3 de MinIO)}
+      - CLOUDFLARE_ACCESS_KEY=${MINIO_ACCESS_KEY:?Definí MINIO_ACCESS_KEY}
+      - CLOUDFLARE_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY:?Definí MINIO_SECRET_KEY}
+      - CLOUDFLARE_BUCKETNAME=${MINIO_BUCKET:-postiz}
+      # URL pública del bucket (lectura anónima): desde acá las redes bajan los archivos.
+      - CLOUDFLARE_BUCKET_URL=${MINIO_PUBLIC_URL:?Definí MINIO_PUBLIC_URL, ej. https://s3.sv00.siux.co/postiz}
+      - CLOUDFLARE_REGION=${MINIO_REGION:-us-east-1}
+      # Solo se usa para armar el endpoint de R2; con CLOUDFLARE_ENDPOINT no importa.
+      - CLOUDFLARE_ACCOUNT_ID=minio
+      # Sin esto el uploader achica las imágenes a 1000px y salen pixeladas en Instagram.
+      - DISABLE_IMAGE_COMPRESSION=true
+
+      # === Redes (cada app de desarrollador registra ${POSTIZ_URL}/integrations/social/<red>)
+      - FACEBOOK_APP_ID=${FACEBOOK_APP_ID:-}
+      - FACEBOOK_APP_SECRET=${FACEBOOK_APP_SECRET:-}
+      - INSTAGRAM_APP_ID=${INSTAGRAM_APP_ID:-}
+      - INSTAGRAM_APP_SECRET=${INSTAGRAM_APP_SECRET:-}
+      - TIKTOK_CLIENT_ID=${TIKTOK_CLIENT_ID:-}
+      - TIKTOK_CLIENT_SECRET=${TIKTOK_CLIENT_SECRET:-}
+      - YOUTUBE_CLIENT_ID=${YOUTUBE_CLIENT_ID:-}
+      - YOUTUBE_CLIENT_SECRET=${YOUTUBE_CLIENT_SECRET:-}
+      - LINKEDIN_CLIENT_ID=${LINKEDIN_CLIENT_ID:-}
+      - LINKEDIN_CLIENT_SECRET=${LINKEDIN_CLIENT_SECRET:-}
+      - THREADS_APP_ID=${THREADS_APP_ID:-}
+      - THREADS_APP_SECRET=${THREADS_APP_SECRET:-}
+      - X_API_KEY=${X_API_KEY:-}
+      - X_API_SECRET=${X_API_SECRET:-}
+
+      # === Email (opcional; sin proveedor no hay recuperación de contraseña)
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-}
+      - EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:-}
+
+      - API_LIMIT=30
+      - NX_ADD_PLUGINS=false
+    volumes:
+      - postiz-config:/config
+    networks:
+      - postiz-network
+      - temporal-network
+    depends_on:
+      postiz-postgres:
+        condition: service_healthy
+      postiz-redis:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    healthcheck:
+      # La imagen no trae curl ni wget; Node 22 tiene fetch.
+      test: ['CMD-SHELL', "node -e \"fetch('http://127.0.0.1:5000/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  postiz-postgres:
+    image: postgres:17-alpine
+    container_name: postiz-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postiz
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=postiz
+    volumes:
+      - postiz-postgres-data:/var/lib/postgresql/data
+    networks:
+      - postiz-network
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postiz -d postiz']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  postiz-redis:
+    image: redis:7.2
+    container_name: postiz-redis
+    restart: unless-stopped
+    volumes:
+      - postiz-redis-data:/data
+    networks:
+      - postiz-network
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── Temporal: ejecuta los workflows de publicación programada ──
+  temporal-postgresql:
+    image: postgres:16
+    container_name: temporal-postgresql
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=temporal
+      - POSTGRES_PASSWORD=${TEMPORAL_DB_PASSWORD:?Definí TEMPORAL_DB_PASSWORD}
+    volumes:
+      # Volumen con nombre: sin esto los posts programados se pierden al recrear el contenedor.
+      - temporal-postgres-data:/var/lib/postgresql/data
+    networks:
+      - temporal-network
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U temporal']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  temporal-elasticsearch:
+    image: elasticsearch:7.17.27
+    container_name: temporal-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms256m -Xmx256m
+      - xpack.security.enabled=false
+      - cluster.routing.allocation.disk.threshold_enabled=true
+      - cluster.routing.allocation.disk.watermark.low=512mb
+      - cluster.routing.allocation.disk.watermark.high=256mb
+      - cluster.routing.allocation.disk.watermark.flood_stage=128mb
+    volumes:
+      - temporal-es-data:/usr/share/elasticsearch/data
+    networks:
+      - temporal-network
+
+  temporal:
+    image: temporalio/auto-setup:1.28.1
+    container_name: temporal
+    restart: unless-stopped
+    depends_on:
+      temporal-postgresql:
+        condition: service_healthy
+      temporal-elasticsearch:
+        condition: service_started
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=${TEMPORAL_DB_PASSWORD}
+      - POSTGRES_SEEDS=temporal-postgresql
+      # Config de producción incluida en la imagen (la del repo trae flags de desarrollo
+      # y obligaría a montar archivos en Portainer).
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/docker.yaml
+      - ENABLE_ES=true
+      - ES_SEEDS=temporal-elasticsearch
+      - ES_VERSION=v7
+      - TEMPORAL_NAMESPACE=default
+    # Sin puertos publicados: solo lo usa postiz por la red interna.
+    networks:
+      - temporal-network
+
+volumes:
+  postiz-config:
+  postiz-postgres-data:
+  postiz-redis-data:
+  temporal-postgres-data:
+  temporal-es-data:
+
+networks:
+  postiz-network:
+    driver: bridge
+  temporal-network:
+    driver: bridge
