@@ -105,7 +105,7 @@ Guardarlos en el gestor de contraseñas. **Si se pierde `JWT_SECRET` se cierran 
 | `POSTIZ_URL` | `https://postiz.siux.co` (tiene que ser https) |
 | `JWT_SECRET`, `TEMPORAL_DB_PASSWORD` | los generados |
 | `DATABASE_URL` | `postgresql://postiz:<clave>@<host>:5432/postiz` |
-| `SHARED_NETWORK` | red de Docker de Postgres y MinIO |
+| `SHARED_NETWORK` | `backend_net` (valor por defecto) |
 | `MINIO_ENDPOINT` | host interno de MinIO, como en tarotia, ej. `minio` |
 | `MINIO_PORT` | `9000` |
 | `MINIO_USE_SSL` | `false` |

@@ -184,4 +184,4 @@ networks:
   # Red existente donde están Postgres y MinIO (la misma que usa tarotia.app).
   shared-network:
     external: true
-    name: ${SHARED_NETWORK:?Definí SHARED_NETWORK, la red de Docker de Postgres y MinIO}
+    name: ${SHARED_NETWORK:-backend_net}
