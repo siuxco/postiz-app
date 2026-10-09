@@ -45,8 +45,11 @@ services:
       - CLOUDFLARE_ACCESS_KEY=${MINIO_ACCESS_KEY:?Definí MINIO_ACCESS_KEY}
       - CLOUDFLARE_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY:?Definí MINIO_SECRET_KEY}
       - CLOUDFLARE_BUCKETNAME=${MINIO_BUCKET_NAME:-postiz}
+      # Carpeta dentro del bucket (ej. postiz/ para compartir el de tarotia). Vacío = raíz.
+      - CLOUDFLARE_KEY_PREFIX=${MINIO_KEY_PREFIX:-}
       # URL pública del bucket (lectura anónima): desde acá las redes bajan los archivos.
-      - CLOUDFLARE_BUCKET_URL=${MINIO_PUBLIC_URL}/${MINIO_BUCKET_NAME:-postiz}
+      # MINIO_BUCKET_URL la reemplaza cuando un proxy ya apunta al bucket (cdn.tarotia.app).
+      - CLOUDFLARE_BUCKET_URL=${MINIO_BUCKET_URL:-${MINIO_PUBLIC_URL}/${MINIO_BUCKET_NAME:-postiz}}
       - CLOUDFLARE_REGION=${MINIO_REGION:-us-east-1}
       # Solo se usa para armar el endpoint de R2; con CLOUDFLARE_ENDPOINT no importa.
       - CLOUDFLARE_ACCOUNT_ID=minio

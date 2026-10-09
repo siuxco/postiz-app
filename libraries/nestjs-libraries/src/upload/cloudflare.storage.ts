@@ -35,6 +35,12 @@ const ALLOWED_MIME_TYPES = new Set<string>([
   'audio/ogg',
 ]);
 
+// CLOUDFLARE_KEY_PREFIX keeps every object under a folder of a shared bucket
+// (e.g. "postiz/"). File names stay bare everywhere else; only the key and the
+// public URL carry the prefix.
+const prefix = (process.env.CLOUDFLARE_KEY_PREFIX || '').replace(/^\/+|\/+$/g, '');
+export const cloudflareKeyPrefix = prefix ? `${prefix}/` : '';
+
 class CloudflareStorage implements IUploadProvider {
   private _client: S3Client;
   private _signer: S3Client;
@@ -125,7 +131,7 @@ class CloudflareStorage implements IUploadProvider {
 
     const params = {
       Bucket: this._bucketName,
-      Key: `${id}.${extension}`,
+      Key: `${cloudflareKeyPrefix}${id}.${extension}`,
       Body: body,
       ContentType: safeContentType,
       ChecksumMode: 'DISABLED',
@@ -134,7 +140,7 @@ class CloudflareStorage implements IUploadProvider {
     const command = new PutObjectCommand({ ...params });
     await this._client.send(command);
 
-    return `${this._uploadUrl}/${id}.${extension}`;
+    return `${this._uploadUrl}/${cloudflareKeyPrefix}${id}.${extension}`;
   }
 
   async uploadFile(file: Express.Multer.File): Promise<any> {
@@ -151,7 +157,7 @@ class CloudflareStorage implements IUploadProvider {
       const command = new PutObjectCommand({
         Bucket: this._bucketName,
         ACL: 'public-read',
-        Key: `${id}.${extension}`,
+        Key: `${cloudflareKeyPrefix}${id}.${extension}`,
         Body: file.buffer,
         ContentType: safeContentType,
       });
@@ -165,8 +171,8 @@ class CloudflareStorage implements IUploadProvider {
         buffer: file.buffer,
         originalname: `${id}.${extension}`,
         fieldname: 'file',
-        path: `${this._uploadUrl}/${id}.${extension}`,
-        destination: `${this._uploadUrl}/${id}.${extension}`,
+        path: `${this._uploadUrl}/${cloudflareKeyPrefix}${id}.${extension}`,
+        destination: `${this._uploadUrl}/${cloudflareKeyPrefix}${id}.${extension}`,
         encoding: '7bit',
         stream: file.buffer as any,
       };
@@ -195,7 +201,7 @@ class CloudflareStorage implements IUploadProvider {
         params: {
           Bucket: this._bucketName,
           ACL: 'public-read',
-          Key: key,
+          Key: cloudflareKeyPrefix + key,
           Body: stream,
           ContentType: mimetype,
         },
@@ -206,7 +212,7 @@ class CloudflareStorage implements IUploadProvider {
         filename: key,
         mimetype,
         originalname: key,
-        path: `${this._uploadUrl}/${key}`,
+        path: `${this._uploadUrl}/${cloudflareKeyPrefix}${key}`,
       };
     } catch (err) {
       console.error('Error streaming file to Cloudflare R2:', err);
@@ -217,7 +223,10 @@ class CloudflareStorage implements IUploadProvider {
   async signDownloadUrl(fileName: string) {
     return getSignedUrl(
       this._signer,
-      new GetObjectCommand({ Bucket: this._bucketName, Key: fileName }),
+      new GetObjectCommand({
+        Bucket: this._bucketName,
+        Key: cloudflareKeyPrefix + fileName,
+      }),
       { expiresIn: 3 * 3600 }
     );
   }
@@ -227,7 +236,7 @@ class CloudflareStorage implements IUploadProvider {
       this._signer,
       new PutObjectCommand({
         Bucket: this._bucketName,
-        Key: fileName,
+        Key: cloudflareKeyPrefix + fileName,
         ContentType: contentType,
       }),
       { expiresIn: 3 * 3600 }
@@ -235,12 +244,15 @@ class CloudflareStorage implements IUploadProvider {
   }
 
   publicUrl(fileName: string) {
-    return `${this._uploadUrl}/${fileName}`;
+    return `${this._uploadUrl}/${cloudflareKeyPrefix}${fileName}`;
   }
 
   async readFile(fileName: string) {
     const { Body } = await this._client.send(
-      new GetObjectCommand({ Bucket: this._bucketName, Key: fileName })
+      new GetObjectCommand({
+        Bucket: this._bucketName,
+        Key: cloudflareKeyPrefix + fileName,
+      })
     );
 
     return Body!.transformToString();
@@ -250,7 +262,7 @@ class CloudflareStorage implements IUploadProvider {
     await this._client.send(
       new PutObjectCommand({
         Bucket: this._bucketName,
-        Key: fileName,
+        Key: cloudflareKeyPrefix + fileName,
         Body: body,
         ContentType: contentType,
       })
@@ -267,7 +279,7 @@ class CloudflareStorage implements IUploadProvider {
     await this._client.send(
       new DeleteObjectCommand({
         Bucket: this._bucketName,
-        Key: fileName,
+        Key: cloudflareKeyPrefix + fileName,
       })
     );
   }

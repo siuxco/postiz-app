@@ -15,6 +15,7 @@ import crypto from 'crypto';
 import path from 'path';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
+import { cloudflareKeyPrefix } from '@gitroom/nestjs-libraries/upload/cloudflare.storage';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { fileTypeFromBuffer } = require('file-type');
 
@@ -122,7 +123,7 @@ export async function simpleUpload(
 
   const params = {
     Bucket: CLOUDFLARE_BUCKETNAME,
-    Key: randomFilename,
+    Key: cloudflareKeyPrefix + randomFilename,
     Body: data,
     ContentType: safeContentType,
   };
@@ -130,7 +131,7 @@ export async function simpleUpload(
   const command = new PutObjectCommand({ ...params });
   await R2.send(command);
 
-  return CLOUDFLARE_BUCKET_URL + '/' + randomFilename;
+  return CLOUDFLARE_BUCKET_URL + '/' + cloudflareKeyPrefix + randomFilename;
 }
 
 export async function createMultipartUpload(req: Request, res: Response) {
@@ -145,7 +146,7 @@ export async function createMultipartUpload(req: Request, res: Response) {
   try {
     const params = {
       Bucket: CLOUDFLARE_BUCKETNAME,
-      Key: `${randomFilename}`,
+      Key: cloudflareKeyPrefix + randomFilename,
       ContentType: safeContentType,
       Metadata: {
         'x-amz-meta-file-hash': fileHash,
@@ -271,6 +272,7 @@ export async function completeMultipartUpload(req: Request, res: Response) {
     response.Location =
       process.env.CLOUDFLARE_BUCKET_URL +
       '/' +
+      cloudflareKeyPrefix +
       response?.Location?.split('/').at(-1);
     return response;
   } catch (err) {
