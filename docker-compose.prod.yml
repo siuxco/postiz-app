@@ -30,6 +30,9 @@ services:
       - REDIS_URL=${REDIS_URL:-}
       - BACKEND_INTERNAL_URL=http://localhost:3000
       - IS_GENERAL=true
+      # Arranca missingPostWorkflow: cada hora relanza los posts en QUEUE de las últimas
+      # 48 h que no tengan workflow en Temporal (ej. si se perdió temporal.db).
+      - RUN_CRON=true
       # Con la base vacía Postiz deja crear el primer usuario aunque esté en true;
       # después nadie más puede registrarse.
       - DISABLE_REGISTRATION=${DISABLE_REGISTRATION:-true}
